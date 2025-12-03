@@ -75,20 +75,21 @@ class _CameraScreenState extends State<CameraScreen> {
       return;
     }
     
-      final faces = await _faceDetector.processImage(inputImage);
+final faces = await _faceDetector.processImage(inputImage);
+if (faces.isEmpty) {
+  _updateStatus("Лицо не найдено");
+  return;
+}
 
-      if (faces.isEmpty) {
-        _updateStatus("Лицо не найдено");
-        return;
-      }
+final face = faces.first;
+final leftOpen = face.leftEyeOpenProbability ?? 0.5;
+final rightOpen = face.rightEyeOpenProbability ?? 0.5;
 
-      final face = faces.first;
-      final leftOpen = face.leftEyeOpenProbability ?? 0.5;
-      final rightOpen = face.rightEyeOpenProbability ?? 0.5;
-
-      final eyesClosed = leftOpen < 0.2 && rightOpen < 0.2;
-      _updateStatus(eyesClosed ? "⚠️ ГЛАЗА ЗАКРЫТЫ!" : "Глаза открыты");
-    });
+if (leftOpen < 0.2 && rightOpen < 0.2) {
+  _updateStatus("⚠️ ГЛАЗА ЗАКРЫТЫ!");
+} else {
+  _updateStatus("Глаза открыты");
+}    });
   }
 
   void _updateStatus(String status) {
