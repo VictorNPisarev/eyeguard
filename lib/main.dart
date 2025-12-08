@@ -39,6 +39,7 @@ class MyApp extends StatelessWidget
   }
 }
 
+
 class CameraScreen extends StatefulWidget 
 {
   final CameraDescription camera;
@@ -64,17 +65,16 @@ class _CameraScreenState extends State<CameraScreen>
     {
       if (!mounted) return;
       setState(() {});
-      _startDetection();
+      // Больше не запускаем поток!
     });
 
-    // Настройка детектора лиц
     _faceDetector = FaceDetector
     (
       options: FaceDetectorOptions
       (
         performanceMode: FaceDetectorMode.accurate,
-        enableLandmarks: true, // ← включает точки глаз
-        enableClassification: true, // ← включает open/closed
+        enableLandmarks: true,
+        enableClassification: true,
       ),
     );
   }
@@ -125,6 +125,41 @@ class _CameraScreenState extends State<CameraScreen>
         }
       }
     );
+  }
+
+  Future<void> _analyzeCurrentFrame() async {
+    if (!_controller.value.isInitialized) return;
+
+    _updateStatus("📸 Делаем снимок...");
+
+    try {
+      // Делаем фото
+      final XFile photo = await _controller.takePicture();
+
+      _updateStatus("🔍 Анализируем изображение...");
+
+      // Конвертируем через файл — это надёжно!
+      final inputImage = InputImage.fromFilePath(photo.path);
+
+      final faces = await _faceDetector.processImage(inputImage);
+
+      if (faces.isEmpty) {
+        _updateStatus("👀 Лицо не найдено");
+        return;
+      }
+
+      final face = faces.first;
+      final leftOpen = face.leftEyeOpenProbability ?? 0.5;
+      final rightOpen = face.rightEyeOpenProbability ?? 0.5;
+
+      if (leftOpen < 0.2 && rightOpen < 0.2) {
+        _updateStatus("⚠️ ГЛАЗА ЗАКРЫТЫ!");
+      } else {
+        _updateStatus("✅ Глаза открыты");
+      }
+    } catch (e) {
+      _updateStatus("💥 Ошибка: $e");
+    }
   }
 
   void _updateStatus(String status) 
@@ -183,6 +218,11 @@ class _CameraScreenState extends State<CameraScreen>
           ),
         ],
       ),
+      floatingActionButton: FloatingActionButton(
+      onPressed: _analyzeCurrentFrame,
+      child: const Icon(Icons.camera),
+      ),
+
     );
   }
 
