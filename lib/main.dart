@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
@@ -54,6 +55,8 @@ class _CameraScreenState extends State<CameraScreen>
   late CameraController _controller;
   late FaceDetector _faceDetector;
   String _status = "Ожидание...";
+  static const int _analysisIntervalSeconds = 30;
+  Timer? _analysisTimer;
 
   @override
   void initState() 
@@ -65,7 +68,7 @@ class _CameraScreenState extends State<CameraScreen>
     {
       if (!mounted) return;
       setState(() {});
-      // Больше не запускаем поток!
+      _startPeriodicAnalysis(); // ← запуск автоматического анализа
     });
 
     _faceDetector = FaceDetector
@@ -162,6 +165,15 @@ class _CameraScreenState extends State<CameraScreen>
     }
   }
 
+  void _startPeriodicAnalysis() {
+    _updateStatus("Автоанализ каждые $_analysisIntervalSeconds сек...");
+
+    _analysisTimer = Timer.periodic(
+      Duration(seconds: _analysisIntervalSeconds),
+      (_) => _analyzeCurrentFrame(),
+    );
+  }
+
   void _updateStatus(String status) 
   {
     if (mounted) 
@@ -179,6 +191,7 @@ class _CameraScreenState extends State<CameraScreen>
   @override
   void dispose() 
   {
+    _analysisTimer?.cancel();
     _controller.dispose();
     _faceDetector.close();
     super.dispose();
