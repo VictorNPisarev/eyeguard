@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math';
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
@@ -58,6 +59,7 @@ class _CameraScreenState extends State<CameraScreen>
   String _status = "Ожидание...";
   bool _isAutoAnalysisRunning = false;
   int _analysisIntervalSeconds = 30;
+  int tempInterval = 30;
   Timer? _analysisTimer;
 
   @override
@@ -138,12 +140,7 @@ class _CameraScreenState extends State<CameraScreen>
     _updateStatus("📸 Делаем снимок...");
 
     try {
-      // Делаем фото
       final XFile photo = await _controller.takePicture();
-
-      _updateStatus("🔍 Анализируем изображение...");
-
-      // Конвертируем через файл — это надёжно!
       final inputImage = InputImage.fromFilePath(photo.path);
 
       final faces = await _faceDetector.processImage(inputImage);
@@ -154,22 +151,19 @@ class _CameraScreenState extends State<CameraScreen>
       }
 
       final face = faces.first;
+
+      // === Глаза ===
       final leftOpen = face.leftEyeOpenProbability ?? 0.5;
       final rightOpen = face.rightEyeOpenProbability ?? 0.5;
+      final eyesStatus = (leftOpen < 0.2 && rightOpen < 0.2)
+          ? "⚠️ Глаза закрыты"
+          : "✅ Глаза открыты";
 
-      if (leftOpen < 0.2 && rightOpen < 0.2) 
-      {
-        _updateStatus("⚠️ ГЛАЗА ЗАКРЫТЫ!");
-          // Проверяем, поддерживается ли вибрация
-        if (await Vibration.hasVibrator()) 
-        {
-          Vibration.vibrate(duration: 500); // 500 мс
-        }
-      } 
-      else 
-      {
-        _updateStatus("✅ Глаза открыты");
-      }
+      // === "GUID" на основе landmarks ===
+      final signature = _computeFaceSignature(face.landmarks);
+      final faceHash = _vectorToHash(signature);
+
+      _updateStatus("$eyesStatus\n👤 ID: $faceHash");
     } catch (e) {
       _updateStatus("💥 Ошибка: $e");
     }
@@ -283,8 +277,6 @@ class _CameraScreenState extends State<CameraScreen>
 
   void _showIntervalDialog() 
   {
-    int tempInterval = _analysisIntervalSeconds;
-
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -331,6 +323,59 @@ class _CameraScreenState extends State<CameraScreen>
       ),
     );
   }
+
+  ///функции анализа контрольных точек
+  List<double> _computeFaceSignature(Map<FaceLandmarkType, FaceLandmark?> landmarksMap) {
+    // Получаем нужные точки из map
+    final FaceLandmark? nose = landmarksMap[FaceLandmarkType.noseBase];
+    final FaceLandmark? leftEye = landmarksMap[FaceLandmarkType.leftEye];
+    final FaceLandmark? rightEye = landmarksMap[FaceLandmarkType.rightEye];
+
+    if (nose == null || leftEye == null || rightEye == null) {
+      return List.filled(72, 0.0);
+    }
+
+    final Point<num> nosePoint = nose.position;
+    final Point<num> leftEyePoint = leftEye.position;
+    final Point<num> rightEyePoint = rightEye.position;
+
+    // Масштаб: расстояние между глазами
+    final eyeDistance = sqrt(
+      pow(rightEyePoint.x - leftEyePoint.x, 2) +
+      pow(rightEyePoint.y - leftEyePoint.y, 2),
+    );
+    final scale = eyeDistance == 0 ? 1.0 : eyeDistance;
+
+    // Теперь обрабатываем ВСЕ 36 точки из FaceLandmarkType.values
+    final List<double> normalized = [];
+    for (final type in FaceLandmarkType.values) {
+      final FaceLandmark? landmark = landmarksMap[type];
+      if (landmark != null) {
+        final dx = (landmark.position.x - nosePoint.x) / scale;
+        final dy = (landmark.position.y - nosePoint.y) / scale;
+        normalized.add(dx.toDouble());
+        normalized.add(dy.toDouble());
+      } else {
+        normalized.add(0.0);
+        normalized.add(0.0);
+      }
+    }
+
+    return normalized;
+  }
+
+  String _vectorToHash(List<double> vec) 
+  {
+    // Суммируем координаты с весом, чтобы получить стабильное число
+    double hashValue = 0.0;
+    for (int i = 0; i < vec.length; i++) {
+      hashValue += vec[i] * (i + 1);
+    }
+    // Берём дробную часть и делаем строку
+    final int intHash = (hashValue * 1000000).abs().toInt() % 99999999;
+    return intHash.toString().padLeft(8, '0');
+  }
+
 
   /// ВСПОМОГАТЕЛЬНАЯ ФУНКЦИЯ КОНВЕРТАЦИИ
   /// Преобразует CameraImage из плагина camera в InputImage для ML Kit
