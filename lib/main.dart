@@ -3,6 +3,7 @@ import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:vibration/vibration.dart';
 
 
 
@@ -55,7 +56,8 @@ class _CameraScreenState extends State<CameraScreen>
   late CameraController _controller;
   late FaceDetector _faceDetector;
   String _status = "Ожидание...";
-  static const int _analysisIntervalSeconds = 30;
+  bool _isAutoAnalysisRunning = false;
+  int _analysisIntervalSeconds = 30;
   Timer? _analysisTimer;
 
   @override
@@ -155,9 +157,17 @@ class _CameraScreenState extends State<CameraScreen>
       final leftOpen = face.leftEyeOpenProbability ?? 0.5;
       final rightOpen = face.rightEyeOpenProbability ?? 0.5;
 
-      if (leftOpen < 0.2 && rightOpen < 0.2) {
+      if (leftOpen < 0.2 && rightOpen < 0.2) 
+      {
         _updateStatus("⚠️ ГЛАЗА ЗАКРЫТЫ!");
-      } else {
+          // Проверяем, поддерживается ли вибрация
+        if (await Vibration.hasVibrator()) 
+        {
+          Vibration.vibrate(duration: 500); // 500 мс
+        }
+      } 
+      else 
+      {
         _updateStatus("✅ Глаза открыты");
       }
     } catch (e) {
@@ -166,12 +176,29 @@ class _CameraScreenState extends State<CameraScreen>
   }
 
   void _startPeriodicAnalysis() {
-    _updateStatus("Автоанализ каждые $_analysisIntervalSeconds сек...");
-
     _analysisTimer = Timer.periodic(
       Duration(seconds: _analysisIntervalSeconds),
       (_) => _analyzeCurrentFrame(),
     );
+  }
+
+  void _stopAutoAnalysis() {
+    _analysisTimer?.cancel();
+    _analysisTimer = null;
+  }
+
+  void _toggleAutoAnalysis() 
+  {
+    if (_isAutoAnalysisRunning) {
+      _stopAutoAnalysis();
+      _updateStatus("Автоанализ остановлен");
+    } else {
+      _startPeriodicAnalysis();
+      _updateStatus("Автоанализ запущен");
+    }
+    setState(() {
+      _isAutoAnalysisRunning = !_isAutoAnalysisRunning;
+    });
   }
 
   void _updateStatus(String status) 
@@ -191,7 +218,7 @@ class _CameraScreenState extends State<CameraScreen>
   @override
   void dispose() 
   {
-    _analysisTimer?.cancel();
+    _stopAutoAnalysis();
     _controller.dispose();
     _faceDetector.close();
     super.dispose();
@@ -231,11 +258,77 @@ class _CameraScreenState extends State<CameraScreen>
           ),
         ],
       ),
-      floatingActionButton: FloatingActionButton(
-      onPressed: _analyzeCurrentFrame,
-      child: const Icon(Icons.camera),
+      floatingActionButton: Column
+      (
+        mainAxisAlignment: MainAxisAlignment.end,
+        children: [
+          FloatingActionButton(
+            onPressed: _toggleAutoAnalysis,
+            child: Icon(_isAutoAnalysisRunning ? Icons.stop : Icons.play_arrow),
+          ),
+          const SizedBox(height: 12),
+          FloatingActionButton(
+            onPressed: _showIntervalDialog,
+            child: const Icon(Icons.timer),
+          ),
+          const SizedBox(height: 12),
+          FloatingActionButton(
+            onPressed: _analyzeCurrentFrame, // ручной запуск
+            child: const Icon(Icons.camera),
+          ),
+        ],
       ),
+    );
+  }
 
+  void _showIntervalDialog() 
+  {
+    int tempInterval = _analysisIntervalSeconds;
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text("Интервал анализа"),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text("Каждые $tempInterval секунд"),
+            Slider(
+              value: tempInterval.toDouble(),
+              min: 5,
+              max: 120,
+              divisions: 115,
+              label: "$tempInterval сек",
+              onChanged: (value) {
+                setState(() {
+                  tempInterval = value.toInt();
+                });
+              },
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text("Отмена"),
+          ),
+          TextButton(
+            onPressed: () {
+              // Применяем новое значение
+              setState(() {
+                _analysisIntervalSeconds = tempInterval;
+              });
+              // Если автоанализ запущен — перезапускаем с новым интервалом
+              if (_isAutoAnalysisRunning) {
+                _stopAutoAnalysis();
+                _startPeriodicAnalysis();
+              }
+              Navigator.pop(context);
+            },
+            child: const Text("OK"),
+          ),
+        ],
+      ),
     );
   }
 
