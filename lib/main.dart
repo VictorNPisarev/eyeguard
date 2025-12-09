@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
@@ -6,7 +7,8 @@ import 'package:permission_handler/permission_handler.dart';
 
 late List<CameraDescription> cameras;
 
-Future<void> main() async {
+Future<void> main() async 
+{
   WidgetsFlutterBinding.ensureInitialized();
 
   // Запрос разрешений
@@ -16,14 +18,19 @@ Future<void> main() async {
   runApp(const MyApp());
 }
 
-class MyApp extends StatelessWidget {
+class MyApp extends StatelessWidget 
+{
   const MyApp({super.key});
 
   @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      home: CameraScreen(
-        camera: cameras.firstWhere(
+  Widget build(BuildContext context) 
+  {
+    return MaterialApp
+    (
+      home: CameraScreen
+      (
+        camera: cameras.firstWhere
+        (
           (c) => c.lensDirection == CameraLensDirection.front,
           orElse: () => cameras.first,
         ),
@@ -32,7 +39,8 @@ class MyApp extends StatelessWidget {
   }
 }
 
-class CameraScreen extends StatefulWidget {
+class CameraScreen extends StatefulWidget 
+{
   final CameraDescription camera;
   const CameraScreen({super.key, required this.camera});
 
@@ -40,10 +48,15 @@ class CameraScreen extends StatefulWidget {
   State<CameraScreen> createState() => _CameraScreenState();
 }
 
-class _CameraScreenState extends State<CameraScreen> {
+class _CameraScreenState extends State<CameraScreen> 
+{
   late CameraController _controller;
   late FaceDetector _faceDetector;
   String _status = "Ожидание...";
+
+  static const int _analysisIntervalSeconds = 30;
+
+  Timer? _analysisTimer;  
 
   @override
   void initState() {
@@ -53,7 +66,9 @@ class _CameraScreenState extends State<CameraScreen> {
     _controller.initialize().then((_) {
       if (!mounted) return;
       setState(() {});
-      _startDetection();
+      //_startDetection(); Анализ по кнопке
+      _startPeriodicAnalysis(); // ← запуск автоматического анализа
+
     });
 
     // Настройка детектора лиц
@@ -91,6 +106,47 @@ class _CameraScreenState extends State<CameraScreen> {
     });
   }
 
+  Future<void> _analyzeCurrentFrame() async {
+    if (!_controller.value.isInitialized) return;
+
+    _updateStatus("📸 Делаем снимок...");
+
+    try {
+      final XFile photo = await _controller.takePicture();
+      final inputImage = InputImage.fromFilePath(photo.path);
+
+      final faces = await _faceDetector.processImage(inputImage);
+
+      if (faces.isEmpty) {
+        _updateStatus("👀 Лицо не найдено");
+        return;
+      }
+
+      final face = faces.first;
+      final leftOpen = face.leftEyeOpenProbability ?? 0.5;
+      final rightOpen = face.rightEyeOpenProbability ?? 0.5;
+
+      if (leftOpen < 0.2 && rightOpen < 0.2) {
+        _updateStatus("⚠️ ГЛАЗА ЗАКРЫТЫ!");
+      } else {
+        _updateStatus("✅ Глаза открыты");
+      }
+    } catch (e) {
+      _updateStatus("💥 Ошибка: $e");
+    }
+  }
+
+  void _startPeriodicAnalysis() 
+  {
+    _updateStatus("Автоанализ каждые $_analysisIntervalSeconds сек...");
+
+    _analysisTimer = Timer.periodic
+    (
+      Duration(seconds: _analysisIntervalSeconds),
+      (_) => _analyzeCurrentFrame(),
+    );
+  }
+
   void _updateStatus(String status) {
     if (mounted) {
       setState(() {
@@ -100,7 +156,9 @@ class _CameraScreenState extends State<CameraScreen> {
   }
 
   @override
-  void dispose() {
+  void dispose() 
+  {
+    _analysisTimer?.cancel();
     _controller.dispose();
     _faceDetector.close();
     super.dispose();
